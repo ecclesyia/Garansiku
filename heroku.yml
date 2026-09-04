@@ -2,4 +2,4 @@ build:
   docker:
     web: Dockerfile
 run:
-  web: nginx -g "daemon off;"
+  web: /docker-entrypoint.sh

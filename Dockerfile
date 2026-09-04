@@ -20,8 +20,6 @@ FROM docker.io/nginxinc/nginx-unprivileged:alpine AS runner
 
 # Default port for local runs; Heroku injects dynamic $PORT at runtime
 ENV PORT=8080
-# Restrict envsubst to PORT only to avoid corrupting Nginx internal variables like $uri
-ENV NGINX_ENVSUBST_FILTER="PORT"
 
 # Copy Nginx template for dynamic port injection
 COPY nginx/default.conf.template /etc/nginx/templates/default.conf.template
@@ -29,13 +27,27 @@ COPY nginx/default.conf.template /etc/nginx/templates/default.conf.template
 # Copy production bundle from builder stage
 COPY --from=builder /app/dist /usr/share/nginx/html
 
-# Grant full write access to config and temp dirs so arbitrary UIDs (Heroku) can run envsubst
+# Create entrypoint script inside container to ensure clean POSIX LF formatting
 USER root
-RUN chmod -R 777 /etc/nginx/conf.d /etc/nginx/templates /var/cache/nginx /var/run /tmp
+RUN printf '%s\n' \
+    '#!/bin/sh' \
+    'set -e' \
+    ': "${PORT:=8080}"' \
+    'echo "Configuring Nginx to listen on port ${PORT}..."' \
+    'envsubst '\''${PORT}'\'' < /etc/nginx/templates/default.conf.template > /etc/nginx/conf.d/default.conf' \
+    'if [ "$#" -gt 0 ]; then' \
+    '    exec "$@"' \
+    'else' \
+    '    exec nginx -g "daemon off;"' \
+    'fi' \
+    > /docker-entrypoint.sh && \
+    chmod +x /docker-entrypoint.sh && \
+    chmod -R 777 /etc/nginx/conf.d /etc/nginx/templates /var/cache/nginx /var/run /tmp
 USER 101
 
 # Expose default port
 EXPOSE 8080
 
-# Launch Nginx in foreground
+# Configure entrypoint and default command
+ENTRYPOINT ["/docker-entrypoint.sh"]
 CMD ["nginx", "-g", "daemon off;"]
